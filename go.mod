@@ -2,7 +2,7 @@ module github.com/csweichel/oci-tool
 
 go 1.26
 
-toolchain go1.26.4
+toolchain go1.26.10
 
 require (
 	github.com/containerd/containerd v1.7.8
