@@ -6,6 +6,7 @@ toolchain go1.26.10
 
 require (
 	github.com/containerd/containerd/v2 v2.4.2
+	github.com/containerd/errdefs v1.0.0
 	github.com/distribution/reference v0.6.0
 	github.com/docker/cli v29.4.3+incompatible
 	github.com/opencontainers/go-digest v1.0.0
@@ -17,7 +18,6 @@ require (
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/log v0.2.0 // indirect
 	github.com/containerd/log/otel v0.1.0 // indirect
 	github.com/containerd/platforms v1.0.0-rc.5 // indirect

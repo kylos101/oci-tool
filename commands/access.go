@@ -22,38 +22,17 @@ func fromFlagsGetResolver(c *cli.Context) (res remotes.Resolver, err error) {
 			return nil, err
 		}
 	}
-	var auth docker.RegistryHosts
+	opts := []docker.RegistryOpt{docker.WithAuthorizer(docker.NewDockerAuthorizer())}
 	if authRegOpt != nil {
-		auth = docker.ConfigureDefaultRegistries(authRegOpt)
+		opts = append(opts, authRegOpt)
 	}
-
-	insecure := c.Bool("insecure")
-
-	var resolverOpts docker.ResolverOptions
-	if auth != nil || insecure {
-		resolverOpts.Hosts = func(s string) (res []docker.RegistryHost, err error) {
-			if auth != nil {
-				res, err = auth(s)
-				if err != nil {
-					return nil, err
-				}
-			}
-
-			if insecure {
-				if len(res) == 0 {
-					res = []docker.RegistryHost{{Scheme: "http"}}
-				} else {
-					for i := range res {
-						res[i].Scheme = "http"
-					}
-				}
-			}
-
-			return
-		}
+	// Match containerd's default localhost handling, or explicitly allow HTTP.
+	if c.Bool("insecure") {
+		opts = append(opts, docker.WithPlainHTTP(docker.MatchAllHosts))
+	} else if authRegOpt == nil {
+		opts = append(opts, docker.WithPlainHTTP(docker.MatchLocalhost))
 	}
-
-	return docker.NewResolver(resolverOpts), nil
+	return newRegistryResolver(docker.ConfigureDefaultRegistries(opts...)), nil
 }
 
 func getAuthorizerFromDockerConfig(fn string) (docker.RegistryOpt, error) {

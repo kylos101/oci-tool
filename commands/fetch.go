@@ -13,6 +13,7 @@ import (
 	"strconv"
 
 	"github.com/containerd/containerd/v2/core/remotes"
+	"github.com/containerd/containerd/v2/pkg/reference"
 	"github.com/opencontainers/go-digest"
 	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/schollz/progressbar/v3"
@@ -157,13 +158,9 @@ func actionFetchManifest(c *cli.Context) error {
 }
 
 func interactiveFetchManifestOrIndex(ctx context.Context, res remotes.Resolver, ref, plt string, dgst digest.Digest) (name string, result *ociv1.Manifest, err error) {
-	resolved, desc, err := res.Resolve(ctx, ref)
+	resolved, desc, err := resolveDescriptor(ctx, res, ref, dgst)
 	if err != nil {
 		return "", nil, fmt.Errorf("cannot resolve %v: %w", ref, err)
-	}
-
-	if dgst != "" {
-		desc.Digest = dgst
 	}
 
 	fetcher, err := res.Fetcher(ctx, resolved)
@@ -230,12 +227,9 @@ func interactiveFetchManifestOrIndex(ctx context.Context, res remotes.Resolver, 
 }
 
 func fetchManifest(ctx context.Context, res remotes.Resolver, ref string, dgst digest.Digest) (resolvedName string, mf *ociv1.Manifest, err error) {
-	name, desc, err := res.Resolve(ctx, ref)
+	name, desc, err := resolveDescriptor(ctx, res, ref, dgst)
 	if err != nil {
 		return "", nil, fmt.Errorf("cannot resolve %v: %w", ref, err)
-	}
-	if dgst != "" {
-		desc.Digest = dgst
 	}
 	fetcher, err := res.Fetcher(ctx, name)
 	if err != nil {
@@ -365,36 +359,48 @@ func actionFetchDirect(c *cli.Context) error {
 	ctx, cancel := fromFlagsGetContext(c)
 	defer cancel()
 
-	name, desc, err := res.Resolve(ctx, ref)
-	if err != nil {
-		return fmt.Errorf("cannot resolve %v: %w", ref, err)
-	}
-	if customDesc.Digest != "" {
-		desc = customDesc
-	}
-
-	fetcher, err := res.Fetcher(ctx, name)
-	if err != nil {
-		return err
-	}
-	if digest != "" {
-		desc.Digest = digest
-	}
-	if ct := c.String("media-type"); ct != "" {
-		desc.MediaType = ct
-	}
-	fres, err := fetcher.Fetch(ctx, desc)
+	fres, err := fetchRaw(ctx, res, ref, digest, customDesc, c.String("media-type"))
 	if err != nil {
 		return err
 	}
 	defer fres.Close()
-
 	_, err = io.Copy(os.Stdout, fres)
-	if err != nil {
-		return err
-	}
+	return err
+}
 
-	return nil
+func fetchRaw(ctx context.Context, res remotes.Resolver, ref string, dgst digest.Digest, customDesc ociv1.Descriptor, mediaType string) (io.ReadCloser, error) {
+	if dgst != "" {
+		// FetchByDigest discovers the object's actual size and supports blobs
+		// larger than the resolver's manifest size limit.
+		fetcher, err := res.Fetcher(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		byDigest, ok := fetcher.(remotes.FetcherByDigest)
+		if !ok {
+			return nil, fmt.Errorf("registry fetcher does not support fetching by digest")
+		}
+		if mediaType == "" {
+			mediaType = customDesc.MediaType
+		}
+		reader, _, err := byDigest.FetchByDigest(ctx, dgst, remotes.WithMediaType(mediaType))
+		return reader, err
+	}
+	name, desc, err := res.Resolve(ctx, ref)
+	if err != nil {
+		return nil, fmt.Errorf("cannot resolve %v: %w", ref, err)
+	}
+	if customDesc.Digest != "" {
+		desc = customDesc
+	}
+	if mediaType != "" {
+		desc.MediaType = mediaType
+	}
+	fetcher, err := res.Fetcher(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	return fetcher.Fetch(ctx, desc)
 }
 
 func actionFetchLayer(c *cli.Context) error {
@@ -605,4 +611,21 @@ func downloadFileFromLayer(ctx context.Context, fetcher remotes.Fetcher, layer o
 		return true, nil
 	}
 	return false, nil
+}
+
+// resolveDescriptor keeps the size and media type paired with the selected digest.
+// A tag may describe an index whose manifest or blob has different metadata.
+func resolveDescriptor(ctx context.Context, res remotes.Resolver, ref string, dgst digest.Digest) (string, ociv1.Descriptor, error) {
+	if dgst != "" {
+		if err := dgst.Validate(); err != nil {
+			return "", ociv1.Descriptor{}, err
+		}
+		spec, err := reference.Parse(ref)
+		if err != nil {
+			return "", ociv1.Descriptor{}, err
+		}
+		spec.Object = "@" + dgst.String()
+		ref = spec.String()
+	}
+	return res.Resolve(ctx, ref)
 }
