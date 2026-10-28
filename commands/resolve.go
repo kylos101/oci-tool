@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/docker/distribution/reference"
+	"github.com/distribution/reference"
 	cli "github.com/urfave/cli/v2"
 )
 
